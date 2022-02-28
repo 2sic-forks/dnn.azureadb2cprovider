@@ -374,19 +374,46 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                 return null;
             }
             var claims = JwtIdToken.Claims.ToArray();
+
             EnsureClaimExists(claims, FirstNameClaimName);
             EnsureClaimExists(claims, LastNameClaimName);
-            EnsureClaimExists(claims, EmailClaimName);
             EnsureClaimExists(claims, UserIdClaim);
             EnsureClaimExists(claims, "sub");       // we need this claim to make calls to AAD Graph
+
+            var email = "";
+
+            // azure ad b2c github (preview) integration does not return "emails" claim
+            if ((claims.FirstOrDefault(x => x.Type == "idp")?.Value ?? "").Equals("github.com", StringComparison.InvariantCultureIgnoreCase))
+            {
+                var gitHubApiClient = new GitHubApiClient();
+
+                var githubUsername = claims.FirstOrDefault(x => x.Type == "name")?.Value;
+                var githubToken = claims.FirstOrDefault(x => x.Type == "idp_access_token")?.Value;
+
+                gitHubApiClient.SetAuthentication(githubUsername, githubToken);
+
+                var githubUserProfile = gitHubApiClient.GetUserProfile();
+                var githubUserEmails = gitHubApiClient.GetUserEmails();
+
+                if (githubUserEmails != null && githubUserEmails.Length > 0)
+                    email = githubUserEmails.FirstOrDefault(w => w.Primary)?.Email ?? "";
+
+                if (string.IsNullOrEmpty(email)) throw new ApplicationException($"no primary email found in github profile");
+            }
+            else
+            {
+                EnsureClaimExists(claims, EmailClaimName);
+                email = claims.FirstOrDefault(x => x.Type == EmailClaimName)?.Value;
+            }
 
             var user = new AzureUserData()
             {
                 AzureFirstName = claims.FirstOrDefault(x => x.Type == FirstNameClaimName)?.Value,
                 AzureLastName = claims.FirstOrDefault(x => x.Type == LastNameClaimName)?.Value,
-                Email = claims.FirstOrDefault(x => x.Type == EmailClaimName)?.Value,
+                Email = email,
                 Id = claims.FirstOrDefault(x => x.Type == UserIdClaim).Value
             };
+
             user.AzureDisplayName = $"{user.AzureFirstName} {user.AzureLastName}";
             return user;
         }

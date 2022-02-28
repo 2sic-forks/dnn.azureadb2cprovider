@@ -224,12 +224,15 @@
     <Compile Include="Components\B2CController.cs" />
     <Compile Include="Components\B2CControllerConfiguration.cs" />
     <Compile Include="Components\FeatureController.cs" />
+    <Compile Include="Components\GitHubApiClient.cs" />
     <Compile Include="Components\Graph\GraphClient.cs" />
     <Compile Include="Components\Graph\GraphExtensions.cs" />
     <Compile Include="Components\Graph\GraphServiceClientFactory.cs" />
     <Compile Include="Components\Graph\Models\NewUser.cs" />
     <Compile Include="Components\IB2CController.cs" />
     <Compile Include="Components\MenuController.cs" />
+    <Compile Include="Components\Models\GitHub\UserEmail.cs" />
+    <Compile Include="Components\Models\GitHub\UserProfile.cs" />
     <Compile Include="Components\Models\ProfileMapping.cs" />
     <Compile Include="Components\Models\RoleMapping.cs" />
     <Compile Include="Components\Models\UserMapping.cs" />

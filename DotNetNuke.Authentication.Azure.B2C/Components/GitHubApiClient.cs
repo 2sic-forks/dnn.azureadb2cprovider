@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,6 +19,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
         private string base64EncodedAuthenticationString = "";
 
         HttpClient httpClient;
+        JsonSerializerSettings jsonSerializerSettings;
 
         public GitHubApiClient()
         {
@@ -26,6 +28,19 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
             httpClient.BaseAddress = baseUri;
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.ConnectionClose = true;
+
+
+            jsonSerializerSettings = new JsonSerializerSettings
+            {
+                ContractResolver = new DefaultContractResolver
+                {
+                    NamingStrategy = new SnakeCaseNamingStrategy
+                    {
+                        OverrideSpecifiedNames = false
+                    }
+                }
+            };
+
         }
 
         public void SetAuthentication(string userName, string token)
@@ -44,7 +59,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
 
             string responseBody = response.Content.ReadAsStringAsync().Result;
 
-            return JsonConvert.DeserializeObject<Models.GitHub.UserProfile>(responseBody);
+            return JsonConvert.DeserializeObject<Models.GitHub.UserProfile>(responseBody, jsonSerializerSettings);
         }
 
         public Models.GitHub.UserEmail[] GetUserEmails()
@@ -56,7 +71,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
             response.EnsureSuccessStatusCode();
 
             string responseBody = response.Content.ReadAsStringAsync().Result;
-            return JsonConvert.DeserializeObject<Models.GitHub.UserEmail[]>(responseBody);
+            return JsonConvert.DeserializeObject<Models.GitHub.UserEmail[]>(responseBody, jsonSerializerSettings);
         }
 
         private HttpRequestMessage buildRequestMessage(HttpMethod method, string requestUri)

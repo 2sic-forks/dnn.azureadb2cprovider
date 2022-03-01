@@ -790,7 +790,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                     PortalId = portalId,
                     ModuleDefId = Null.NullInteger,
                     PropertyCategory = "Security",
-                    PropertyName = "IdentitySource",
+                    PropertyName = "GitHubId",
                     Required = false,
                     Visible = false,
                     ViewOrder = -1

@@ -12,7 +12,7 @@ define(['jquery',
         function loadScript(basePath) {
             var normalizedCulture = config.culture.split("-")[0];
             var language = getBundleLanguage(normalizedCulture);
-            var url = basePath + "/bundle-" + language + ".js";
+            var url = basePath + "bundle-" + language + ".js";
             $.ajax({
                 dataType: "script",
                 cache: true,
@@ -38,6 +38,7 @@ define(['jquery',
                 }
 
                 var publicPath = settings.uiUrl + "/scripts/bundles/";
+
                 window.dnn.initAzureADB2C = function initializeAzureADB2C() {
                     return {
                         publicPath: publicPath,

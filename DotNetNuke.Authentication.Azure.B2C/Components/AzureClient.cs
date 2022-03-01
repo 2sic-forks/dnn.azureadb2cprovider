@@ -405,7 +405,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
 
                 user = new AzureUserData()
                 {
-                    GitHubId = githubUserProfile.Id.ToString(),
+                    GitHubId = githubUserProfile.NodeId,
                     AzureDisplayName = githubUserProfile.Name,
                     Email = githubUserEmails.FirstOrDefault(w => w.Primary)?.Email,
                     Id = claims.FirstOrDefault(x => x.Type == UserIdClaim).Value,

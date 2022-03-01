@@ -65,6 +65,8 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
         [DataMember(Name = "name")]
         public string AzureDisplayName { get; set; }
 
+        public string GitHubId { get; set; }
+
         public UserInfo ToUserInfo(bool usernamePrefixEnabled)
         {
             return new UserInfo()

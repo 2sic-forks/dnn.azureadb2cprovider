@@ -53,6 +53,7 @@ using System.Net;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web;
 using System.Web.Script.Serialization;
 using static DotNetNuke.Services.Authentication.AuthenticationLoginBase;
@@ -375,12 +376,11 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
             }
             var claims = JwtIdToken.Claims.ToArray();
 
-            EnsureClaimExists(claims, FirstNameClaimName);
-            EnsureClaimExists(claims, LastNameClaimName);
+
             EnsureClaimExists(claims, UserIdClaim);
             EnsureClaimExists(claims, "sub");       // we need this claim to make calls to AAD Graph
 
-            var email = "";
+            AzureUserData user;
 
             // azure ad b2c github (preview) integration does not return "emails" claim
             if ((claims.FirstOrDefault(x => x.Type == "idp")?.Value ?? "").Equals("github.com", StringComparison.InvariantCultureIgnoreCase))
@@ -392,29 +392,42 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
 
                 gitHubApiClient.SetAuthentication(githubUsername, githubToken);
 
-                var githubUserProfile = gitHubApiClient.GetUserProfile();
-                var githubUserEmails = gitHubApiClient.GetUserEmails();
+                var gitHubUserProfileTask = new Task<Models.GitHub.UserProfile>(() => gitHubApiClient.GetUserProfile());
+                var gitHubUserEmailsTask = new Task<Models.GitHub.UserEmail[]>(() => gitHubApiClient.GetUserEmails());
 
-                if (githubUserEmails != null && githubUserEmails.Length > 0)
-                    email = githubUserEmails.FirstOrDefault(w => w.Primary)?.Email ?? "";
+                gitHubUserProfileTask.Start();
+                gitHubUserEmailsTask.Start();
 
-                if (string.IsNullOrEmpty(email)) throw new ApplicationException($"no primary email found in github profile");
+                Task.WaitAll(new Task[] { gitHubUserProfileTask, gitHubUserEmailsTask }, 1000 * 15);
+
+                var githubUserProfile = gitHubUserProfileTask.Result;
+                var githubUserEmails = gitHubUserEmailsTask.Result;
+
+                user = new AzureUserData()
+                {
+                    GitHubId = githubUserProfile.Id.ToString(),
+                    AzureDisplayName = githubUserProfile.Name,
+                    Email = githubUserEmails.FirstOrDefault(w => w.Primary)?.Email,
+                    Id = claims.FirstOrDefault(x => x.Type == UserIdClaim).Value,
+                };
             }
             else
             {
-                EnsureClaimExists(claims, EmailClaimName);
-                email = claims.FirstOrDefault(x => x.Type == EmailClaimName)?.Value;
+                EnsureClaimExists(claims, EmailClaimName); 
+                EnsureClaimExists(claims, FirstNameClaimName);
+                EnsureClaimExists(claims, LastNameClaimName);
+                user = new AzureUserData()
+                {
+                    AzureFirstName = claims.FirstOrDefault(x => x.Type == FirstNameClaimName)?.Value,
+                    AzureLastName = claims.FirstOrDefault(x => x.Type == LastNameClaimName)?.Value,
+                    Email = claims.FirstOrDefault(x => x.Type == EmailClaimName)?.Value,
+                    Id = claims.FirstOrDefault(x => x.Type == UserIdClaim).Value
+                };
+
+
+                user.AzureDisplayName = $"{user.AzureFirstName} {user.AzureLastName}";
             }
-
-            var user = new AzureUserData()
-            {
-                AzureFirstName = claims.FirstOrDefault(x => x.Type == FirstNameClaimName)?.Value,
-                AzureLastName = claims.FirstOrDefault(x => x.Type == LastNameClaimName)?.Value,
-                Email = email,
-                Id = claims.FirstOrDefault(x => x.Type == UserIdClaim).Value
-            };
-
-            user.AzureDisplayName = $"{user.AzureFirstName} {user.AzureLastName}";
+        
             return user;
         }
 
@@ -558,7 +571,11 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
             {
                 portalSettings = PortalSettings.Current;
             }
-            var user = GetCurrentUserInternal(pToken).ToUserInfo(Settings.UsernamePrefixEnabled);
+
+
+            var azureUserData = GetCurrentUserInternal(pToken);
+            var user = azureUserData.ToUserInfo(Settings.UsernamePrefixEnabled);
+
             // Update user
             var userInfo = UserController.GetUserByName(portalSettings.PortalId, user.Username);
 
@@ -582,6 +599,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                     UpdateUserProfilePicture(JwtIdToken.Claims.First(c => c.Type == "sub").Value, userInfo);
                 }
             }
+
             UserController.UpdateUser(portalSettings.PortalId, userInfo);
 
             // Update user roles
@@ -699,6 +717,9 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                 throw new MissingFieldException($"Can't find '{userIdClaim}' claim on token, needed to identify the user");
             }
 
+
+            var azureUserData = user as AzureUserData;
+
             var usernamePrefixEnabled = bool.Parse(AzureConfig.GetSetting(AzureConfig.ServiceName, "UsernamePrefixEnabled", portalSettings.PortalId, "true"));
             var usernameToFind = usernamePrefixEnabled ? $"{AzureConfig.ServiceName}-{userClaim.Value}" : userClaim.Value;
             var userInfo = UserController.GetUserByName(portalSettings.PortalId, usernameToFind);
@@ -716,6 +737,9 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                     }
                     UpdateUserAndRoles(userInfo);
                     MarkUserAsB2c(userInfo);
+
+                    if(azureUserData != null)
+                        UpdateUsersGitHubId(userInfo, azureUserData.GitHubId);
                 }
             }
             else
@@ -724,9 +748,22 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                 {
                     UpdateUserAndRoles(userInfo);
                     MarkUserAsB2c(userInfo);
+
+                    if (azureUserData != null)
+                        UpdateUsersGitHubId(userInfo, azureUserData.GitHubId);
                 }
                 base.AuthenticateUser(user, portalSettings, IPAddress, addCustomProperties, onAuthenticated);
             }
+        }
+
+        private void UpdateUsersGitHubId(UserInfo userInfo, string gitHubId)
+        {
+            EnsureGitHubIdProfilePropertyDefinitionExists(-1); //  Ensure profile property exists for superusers
+            EnsureGitHubIdProfilePropertyDefinitionExists(userInfo.PortalID);
+
+            userInfo.Profile.SetProfileProperty("GitHubId", gitHubId);
+
+            Security.Profile.ProfileProvider.Instance().UpdateUserProfile(userInfo);
         }
 
         private void MarkUserAsB2c(UserInfo user)
@@ -735,7 +772,31 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
             EnsureIdentitySourceProfilePropertyDefinitionExists(user.PortalID);
 
             user.Profile.SetProfileProperty("IdentitySource", "Azure-B2C");
+
             Security.Profile.ProfileProvider.Instance().UpdateUserProfile(user);
+        }
+
+        private static void EnsureGitHubIdProfilePropertyDefinitionExists(int portalId)
+        {
+            var def = ProfileController.GetPropertyDefinitionByName(portalId, "GitHubId");
+            if (def == null)
+            {
+                var dataTypes = (new ListController()).GetListEntryInfoDictionary("DataType");
+                var definition = new ProfilePropertyDefinition(portalId)
+                {
+                    DataType = dataTypes["DataType:Text"].EntryID,
+                    DefaultValue = "",
+                    DefaultVisibility = UserVisibilityMode.AdminOnly,
+                    PortalId = portalId,
+                    ModuleDefId = Null.NullInteger,
+                    PropertyCategory = "Security",
+                    PropertyName = "IdentitySource",
+                    Required = false,
+                    Visible = false,
+                    ViewOrder = -1
+                };
+                ProfileController.AddPropertyDefinition(definition);
+            }
         }
 
         private static void EnsureIdentitySourceProfilePropertyDefinitionExists(int portalId)
@@ -768,6 +829,7 @@ namespace DotNetNuke.Authentication.Azure.B2C.Components
                 userInfo.Membership.Approved = true; // Delegate approval on Auth Provider
                 UserController.UpdateUser(userInfo.PortalID, userInfo);
             }
+
             UpdateUserRoles(JwtIdToken.Claims.First(c => c.Type == "sub").Value, userInfo);
             UpdateUserProfilePicture(JwtIdToken.Claims.First(c => c.Type == "sub").Value, userInfo, true);
         }
